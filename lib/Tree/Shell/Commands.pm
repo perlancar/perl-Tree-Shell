@@ -5,7 +5,7 @@ package Tree::Shell::Commands;
 # DIST
 # VERSION
 
-use 5.010;
+use 5.010001;
 use strict;
 use warnings;
 use Log::ger;
@@ -76,41 +76,155 @@ my $complete_setting_name = sub {
     [keys %{ $shell->known_settings }];
 };
 
-# format of summary: <shell-ish description> (<equivalent in terms of Riap>)
-#
-# for format of description, we follow Term::Shell style: no first-letter cap,
-# verb in 3rd person present tense.
+my %argopt_object = (
+    object => {
+        schema => ['str*', match=>qr/\A\w+\z/],
+        cmdline_aliases => {o=>{}},
+    },
+);
+
+my @drivers = qw(json yaml org);
+
+$SPEC{load} = {
+    v => 1.1,
+    summary => 'Load tree object',
+    description => <<'_',
+
+_
+    args => {
+        as => {
+            schema => ['str*', {match => qr/\A\w+\z/}],
+            pos => 0,
+            req => 1,
+        },
+        driver => {
+            schema => ['str*', {in=>\@drivers}],
+            pos => 1,
+            req => 1,
+        },
+        source => {
+            schema => ['str*'],
+            pos => 2,
+            req => 1,
+        },
+        opts => {
+            'x.name.is_plural' => 1,
+            'x.name.singular' => 'opt',
+            schema => ['hash*', {of=>'str*'}],
+        },
+    },
+};
+sub load {
+    require File::Slurper::Dash;
+
+    my %args = @_;
+    my $as     = $args{as};
+    my $driver = $args{driver};
+    my $source = $args{source};
+    my $shell  = $args{-shell};
+
+    if ($shell->state('objects')->{$as}) {
+        return [412, "Object with named '$as' already loaded, perhaps choose another name?"];
+    }
+
+    my $tree;
+    if ($driver eq 'json') {
+        require Data::CSel::WrapStruct;
+        require JSON::MaybeXS;
+        my $json = JSON::MaybeXS->new(allow_nonref=>1, canonical=>1);
+        my $data = $json->decode(File::Slurper::Dash::read_text($source));
+        $tree = Data::CSel::WrapStruct::wrap_struct($data);
+    } elsif ($driver eq 'yaml') {
+        require Data::CSel::WrapStruct;
+        require YAML::XS;
+        my $data = YAML::XS::Load(File::Slurper::Dash::read_text($source));
+        my $tree = Data::CSel::WrapStruct::wrap_struct($data);
+    } elsif ($driver eq 'org') {
+        require Org::Parser::Tiny;
+        $tree = Org::Parser::Tiny->new->parse_file($source);
+    } else {
+        return [500, "Unknown driver '$driver', known drivers: ".join(", ", @drivers)];
+    }
+
+    $shell->state('objects')->{$as} = {
+        driver => $driver,
+        source => $source,
+        object => $tree,
+        cwd    => '/',
+    };
+    return [200, "OK"];
+}
+
+$SPEC{objects} = {
+    v => 1.1,
+    summary => 'List loaded objects',
+    description => <<'_',
+
+_
+    args => {
+    },
+};
+sub objects {
+    my %args = @_;
+    my $shell  = $args{-shell};
+
+    my $objects = $shell->state('objects');
+    my @rows;
+    for my $name (sort keys %$objects) {
+        push @rows, {
+            name => $name,
+            driver => $objects->{$name}{driver},
+            source => $objects->{$name}{source},
+            cwd    => $objects->{$name}{cwd},
+        };
+    }
+    [200, "OK", \@rows];
+}
+
+$SPEC{dump} = {
+    v => 1.1,
+    summary => 'Dump a loaded object',
+    description => <<'_',
+
+_
+    args => {
+        name => {
+            schema => 'str*',
+            req => 1,
+            pos => 0,
+            #completion => $complete_object_name,
+        },
+    },
+};
+sub dump {
+    my %args = @_;
+    my $name   = $args{name};
+    my $shell  = $args{-shell};
+
+    my $objects = $shell->state('objects');
+    return [404, "No object by that name"] unless $objects->{$name};
+
+    require Tree::Dump;
+    [200, "OK", Tree::Dump::tdmp($objects->{$name}{object}),
+     {'cmdline.skip_format'=>1}];
+}
 
 $SPEC{ls} = {
     v => 1.1,
-    summary => 'lists contents of packages (Riap list request)',
+    summary => 'List children nodes',
     args => {
+        %argopt_object,
         long => {
             summary => 'Long mode (detail=1)',
-            description => <<'_',
-
-This will cause the command to request `child_metas` action to the server
-instead of `list`, to get more details.
-
-_
-            schema => ['bool'],
+            schema => ['true*'],
             cmdline_aliases => { l => {} },
         },
-        # completion acts a bit weird, so we use single path atm
-        #paths => {
-        #    summary    => 'Path(s) (URIs) to list',
-        #    schema     => ['array*' => 'of' => 'str*'],
-        #    req        => 0,
-        #    pos        => 0,
-        #    greedy     => 1,
-        #    element_completion => $complete_file_or_dir,
-        #},
         path => {
-            summary    => 'Path (URI) to list',
+            summary    => 'Path to node',
             schema     => ['str*'],
             req        => 0,
             pos        => 0,
-            completion => $complete_file_or_dir,
+            #completion => $complete_file_or_dir,
         },
         all => {
             summary     => 'Does nothing, added only to let you type ls -la',
@@ -124,7 +238,6 @@ _
             cmdline_aliases => { a=>{} },
         },
     },
-    "x.app.riap.aliases" => ["list"],
 };
 sub ls {
     my %args = @_;
@@ -193,15 +306,12 @@ sub ls {
 
 $SPEC{pwd} = {
     v => 1.1,
-    summary => 'shows current directory',
+    summary => 'Show current directory of object(s)',
     args => {
     },
 };
 sub pwd {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    [200, "OK", $shell->{_state}{pwd}];
+    goto &objects;
 }
 
 $SPEC{cd} = {
@@ -415,87 +525,9 @@ sub req {
     $shell->riap_request($action => $uri, $extra);
 }
 
-$SPEC{meta} = {
-    v => 1.1,
-    summary => 'performs meta action on file/dir (Riap entity)',
-    args => {
-        path => {
-            summary    => 'Path (URI)',
-            schema     => 'str*',
-            req        => 1,
-            pos        => 0,
-            completion => $complete_file_or_dir,
-        },
-    },
-};
-sub meta {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    my $pwd  = $shell->state("pwd");
-    my $path = $args{path};
-    my $uri  = _concat_path_ns($pwd, $path);
-
-    $shell->riap_request(meta => $uri);
-}
-
-$SPEC{info} = {
-    v => 1.1,
-    summary => 'performs info action on file/dir (Riap entity)',
-    args => {
-        path => {
-            summary    => 'Path (entity URI)',
-            schema     => 'str*',
-            req        => 1,
-            pos        => 0,
-            completion => $complete_file_or_dir,
-        },
-    },
-};
-sub info {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    my $pwd  = $shell->state("pwd");
-    my $path = $args{path};
-    my $uri  = _concat_path_ns($pwd, $path);
-
-    $shell->riap_request(info => $uri);
-}
-
-$SPEC{call} = {
-    v => 1.1,
-    summary => 'performs call action on file (Riap function)',
-    args => {
-        path => {
-            summary    => 'Path to file (Riap function)',
-            schema     => 'str*',
-            req        => 1,
-            pos        => 0,
-            completion => $complete_file_or_dir,
-        },
-        args => {
-            summary    => 'Arguments to pass to function',
-            schema     => 'hash*',
-            pos        => 1,
-        },
-    },
-};
-sub call {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    my $pwd  = $shell->state("pwd");
-    my $path = $args{path};
-    my $uri  = _concat_path_ns($pwd, $path);
-    my $args = $args{args};
-
-    $shell->riap_request(call => $uri, {args=>$args});
-}
-
 $SPEC{history} = {
     v => 1.1,
-    summary => 'shows command-line history',
+    summary => 'Show command-line history',
     args => {
         append => {
             summary    => "Append current session's history to history file",

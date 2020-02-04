@@ -29,6 +29,7 @@ sub new {
 
     # TODO: override some settings from env, if available
     $self->load_settings;
+    $self->{_settings}{output_format} //= 'text';
 
     $self->{_in_completion} = 0;
 
@@ -37,6 +38,9 @@ sub new {
         (defined $ENV{NO_COLOR} ? 0 : undef) //
         $ENV{COLOR} //
         (detect_terminal_cached()->{color_depth} > 1 ? 1:0);
+
+    # beginning state
+    $self->{_state}{objects} = {};
 
     $self;
 }
@@ -142,6 +146,10 @@ sub known_settings {
             debug_stack_trace => {
                 summary => 'Whether to print stack trace on die/warning',
                 schema  => ['bool', default=>0],
+            },
+            output_format => {
+                summary => 'Output format',
+                schema => ['str*', default=>'text'],
             },
         };
         require Data::Sah::Normalize;

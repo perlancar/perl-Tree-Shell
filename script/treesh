@@ -22,31 +22,36 @@ $shell->cmdloop;
 =head1 SYNOPSIS
 
  % treesh --help
- % treesh [opts] [loadspec] ...
+ % treesh [opts]
 
  treesh> _
 
-Load some objects from the command-line:
+Load a tree object (from a JSON file):
 
- % treesh todo=org:/home/budi/todo.org json1=json:-
+ treesh> load --as bookstore --driver json --source /home/budi/bookstore.json
+ treesh> load bookstore json /home/budi/bookstore.json
+
+Load another tree object (from an Org document):
+
+ treesh> load todo org /home/budi/todo.org
+
+Load with some options:
+
+ treesh> load todo org /home/budi/todo.org --opt NAME=VAL ...
 
 See loaded objects:
 
  treesh> objects
- +-----------+-------------------------+-----+
- | name      | spec                    | cwd |
- +-----------+-------------------------+-----+
- | todo      | org:/home/budi/todo.org | /   |
- | json1     | json:-                  | /   |
- +-----------+-------------------------+-----+
-
-Load some more objects from the shell:
-
- treesh> load books=json:/home/budi/books.json done=/home/budi/done.org
+ +-----------+--------+---------------------------+-----+
+ | name      | driver | source                    | cwd |
+ +-----------+--------+---------------------------+-----+
+ | bookstore | json   | /home/budi/bookstore.json | /   |
+ | todo      | org    | /home/budi/todo.org       | /   |
+ +-----------+--------+---------------------------+-----+
 
 Dump a loaded object:
 
- treesh> dump books
+ treesh> dump bookstore
  ...
 
 Browse top-level children of a tree object:
