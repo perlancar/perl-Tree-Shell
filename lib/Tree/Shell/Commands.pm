@@ -1,6 +1,8 @@
-package App::riap::Commands;
+package Tree::Shell::Commands;
 
+# AUTHORITY
 # DATE
+# DIST
 # VERSION
 
 use 5.010;
@@ -25,7 +27,7 @@ our %SPEC;
 
 $SPEC{':package'} = {
     v => 1.1,
-    summary => 'riap shell commands',
+    summary => 'treesh commands',
 };
 
 my $_complete_dir_or_file = sub {
@@ -204,7 +206,7 @@ sub pwd {
 
 $SPEC{cd} = {
     v => 1.1,
-    summary => "changes directory",
+    summary => "Change directory",
     args => {
         dir => {
             summary    => '',

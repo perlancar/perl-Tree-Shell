@@ -1,6 +1,8 @@
 package Tree::Shell;
 
+# AUTHORITY
 # DATE
+# DIST
 # VERSION
 
 use 5.010001;
@@ -19,14 +21,14 @@ sub new {
     my ($class, %args) = @_;
 
     $class->_install_cmds;
+
     my $self = $class->SUPER::new();
+    $self->{program_name} = $args{program_name} // 'treesh';
+
     $self->load_history;
 
-    # load settings from file
-    $self->{program_name} = $args{program_name} // 'treeshell';
-    $self->load_settings;
-
     # TODO: override some settings from env, if available
+    $self->load_settings;
 
     $self->{_in_completion} = 0;
 
@@ -34,15 +36,7 @@ sub new {
     $self->{use_color} //=
         (defined $ENV{NO_COLOR} ? 0 : undef) //
         $ENV{COLOR} //
-        detect_terminal_cached()->{color};
-
-    # override some settings from args, if defined
-    $self->setting(tree => $args{tree}) if defined $opts{tree};
-
-    # determine starting pwd
-    $self->state(pwd => "/");
-    $self->state(start_pwd  => "/");
-    $self->run_cd($pwd);
+        (detect_terminal_cached()->{color_depth} > 1 ? 1:0);
 
     $self;
 }
@@ -268,8 +262,9 @@ sub prompt_str {
     my $self = shift;
     join(
         "",
-        $self->colorize("tree", "ffa07a"), " ", # lightsalmon
-        $self->colorize($self->state("pwd"), "2e8b57"), " ", # seagreen
+        $self->colorize("treesh", "ff6347"), " ", # X:tomato
+        $self->colorize("obj", "eeee00"), " ", # X:yellow2
+        $self->colorize("cwd", "00e5ee"), "", # X:turquoise2
         "> ",
     );
 }
@@ -500,11 +495,11 @@ sub _install_cmds {
 
     require Tree::Shell::Commands;
     require Complete::Util;
-    for my $cmd (sort keys %App::riap::Commands::SPEC) {
+    for my $cmd (sort keys %Tree::Shell::Commands::SPEC) {
         next unless $cmd =~ /\A\w+\z/; # only functions
         log_trace("Installing command $cmd ...");
         my $meta = $Tree::Shell::Commands::SPEC{$cmd};
-        my $code = \&{"App::riap::Commands::$cmd"};
+        my $code = \&{"Tree::Shell::Commands::$cmd"};
         *{"smry_$cmd"} = sub { $meta->{summary} };
         *{"run_$cmd"} = sub {
             my $self = shift;
@@ -559,47 +554,13 @@ sub _install_cmds {
 }
 
 1;
-# ABSTRACT: Navigate in-memory tree object using a CLI shell
+# ABSTRACT: Navigate and manipulate in-memory tree objects using a CLI shell
 
 =for Pod::Coverage ^(.+)$
 
 =head1 SYNOPSIS
 
-First, prepare your tree object. Any class with C<children> and C<parent>
-methods will do. Please refer to L<Role::TinyCommons::Tree::Node> for more
-details on the requirements for the tree node class. In the example below, we'll
-use a tree object representation of an Org document, produced by L<Org::Parser>:
-
- use Org::Parser;
- my $doc = Org::Parser=>new->parse_file("todo.org");
-
-Then, open a shell for this object:
-
- use Tree::Shell;
- Tree::Shell->new->cmdloop(); #
-
-You will be greeted with the tree shell prompt:
-
- tree> _
-
-=head2 Moving around
-
-The tree shell allows you to browse your tree object like it is a filesystem.
-
-The default "path" is / (root) which corresponds to the root node.
-
- tree> pwd
- /
-
-
-=head2 Moving nodes
-
-=head2 Copying nodes
-
-=head2 Deleting nodes
-
-
-=head1 DESCRIPTION
+See L<treesh> for more details.
 
 
 =head1 SEE ALSO
