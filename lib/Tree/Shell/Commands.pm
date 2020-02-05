@@ -10,18 +10,7 @@ use strict;
 use warnings;
 use Log::ger;
 
-use Path::Naive qw(is_abs_path normalize_path concat_path_n);
-#use Perinci::Sub::Util qw(err);
-
-# like Path::Naive's concat_path_n, but adds "/" at the end when it thinks the
-# final path is a directory (package). it also doesn't die if $p2 is empty.
-sub _concat_path_ns {
-    my ($p1, $p2) = @_;
-    return $p1 unless defined($p2) && length($p2);
-    my $res = concat_path_n($p1, $p2);
-    $res .= "/" if $p2 =~ m!\A\.\.?\z|/\z!;
-    $res;
-}
+use Path::Naive qw();
 
 our %SPEC;
 
@@ -30,9 +19,7 @@ $SPEC{':package'} = {
     summary => 'treesh commands',
 };
 
-my $_complete_dir_or_file = sub {
-    my $which = shift;
-
+our $complete_path = sub {
     my %args = @_;
     my $shell = $args{-shell};
 
@@ -40,33 +27,14 @@ my $_complete_dir_or_file = sub {
     my ($dir, $word) = $word0 =~ m!(.*/)?(.*)!;
     $dir //= "";
 
-    my $pwd = $shell->state("pwd");
-    my $uri = length($dir) ? Path::Naive::concat_path_n($pwd, $dir) : $pwd;
-    $uri .= "/" unless $uri =~ m!/\z!;
-    my $extra = {};
-    $extra->{type} = 'package' if $which eq 'dir';
-    $extra->{type} = 'function' if $which eq 'executable';
-    my $res = $shell->riap_request(list => $uri, $extra);
-    return [] unless $res->[0] == 200;
-    my @res = ();
-    push @res, "../" unless $uri eq '/';
-    for (@{ $res->[2] }) {
-        s/\A\Q$uri\E//;
-        push @res, "$dir$_";
-    }
-    \@res;
-};
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    return {message=>"No current object, please load some objects first"} unless $obj;
 
-my $complete_dir = sub {
-    $_complete_dir_or_file->('dir', @_);
-};
+    my $cwd = $obj->{fs}->cwd;
+    my %fsls_res = $obj->{fs}->ls(
+        length($dir) ? scalar(Path::Naive::concat_path_n($cwd, $dir)) : undef);
 
-my $complete_file_or_dir = sub {
-    $_complete_dir_or_file->('file_or_dir', @_);
-};
-
-my $complete_executable = sub {
-    $_complete_dir_or_file->('executable', @_);
+    [map {(length($dir) ? $dir : "") . "$_/"} keys %fsls_res];
 };
 
 my $complete_setting_name = sub {
@@ -127,21 +95,23 @@ sub load {
         return [412, "Object with named '$as' already loaded, perhaps choose another name?"];
     }
 
-    my $tree;
+    my $fs;
     if ($driver eq 'json') {
-        require Data::CSel::WrapStruct;
-        require JSON::MaybeXS;
-        my $json = JSON::MaybeXS->new(allow_nonref=>1, canonical=>1);
-        my $data = $json->decode(File::Slurper::Dash::read_text($source));
-        $tree = Data::CSel::WrapStruct::wrap_struct($data);
+        return [501, "Not implemented"];
+        #require Data::CSel::WrapStruct;
+        #require JSON::MaybeXS;
+        #my $json = JSON::MaybeXS->new(allow_nonref=>1, canonical=>1);
+        #my $data = $json->decode(File::Slurper::Dash::read_text($source));
+        #$tree = Data::CSel::WrapStruct::wrap_struct($data);
     } elsif ($driver eq 'yaml') {
-        require Data::CSel::WrapStruct;
-        require YAML::XS;
-        my $data = YAML::XS::Load(File::Slurper::Dash::read_text($source));
-        my $tree = Data::CSel::WrapStruct::wrap_struct($data);
+        return [501, "Not implemented"];
+        #require Data::CSel::WrapStruct;
+        #require YAML::XS;
+        #my $data = YAML::XS::Load(File::Slurper::Dash::read_text($source));
+        #my $tree = Data::CSel::WrapStruct::wrap_struct($data);
     } elsif ($driver eq 'org') {
-        require Org::Parser::Tiny;
-        $tree = Org::Parser::Tiny->new->parse_file($source);
+        require Tree::FSMethods::Org;
+        $fs = Tree::FSMethods::Org->new(org_file => $source);
     } else {
         return [500, "Unknown driver '$driver', known drivers: ".join(", ", @drivers)];
     }
@@ -149,9 +119,9 @@ sub load {
     $shell->state('objects')->{$as} = {
         driver => $driver,
         source => $source,
-        object => $tree,
-        cwd    => '/',
+        fs     => $fs,
     };
+    $shell->state('curobj', $as) unless defined $shell->state('curobj');
     return [200, "OK"];
 }
 
@@ -169,16 +139,18 @@ sub objects {
     my $shell  = $args{-shell};
 
     my $objects = $shell->state('objects');
+    my $curobj  = $shell->state('curobj') // '';
     my @rows;
     for my $name (sort keys %$objects) {
         push @rows, {
             name => $name,
             driver => $objects->{$name}{driver},
             source => $objects->{$name}{source},
-            cwd    => $objects->{$name}{cwd},
+            active => $name eq $curobj ? 1:0,
+            cwd    => $objects->{$name}{fs}->cwd,
         };
     }
-    [200, "OK", \@rows];
+    [200, "OK", \@rows, {'table.fields'=>[qw/name driver source active cwd/]}];
 }
 
 $SPEC{dump} = {
@@ -221,10 +193,9 @@ $SPEC{ls} = {
         },
         path => {
             summary    => 'Path to node',
-            schema     => ['str*'],
-            req        => 0,
+            schema     => ['str'],
             pos        => 0,
-            #completion => $complete_file_or_dir,
+            completion => $complete_path,
         },
         all => {
             summary     => 'Does nothing, added only to let you type ls -la',
@@ -243,65 +214,32 @@ sub ls {
     my %args = @_;
     my $shell = $args{-shell};
 
-    my $pwd = $shell->state("pwd");
-    my $uri;
-    my ($dir, $leaf);
     my $resmeta = {};
 
-    my @allres;
-    #for my $path (@{ $args{paths} // [undef] }) {
-    for my $path ($args{path}) {
-        $uri = $pwd . ($pwd =~ m!/\z! ? "" : "/");
-        if (defined $path) {
-            $uri = _concat_path_ns($pwd, $path);
-        }
-
-        my $res;
-        if ($args{long}) {
-            $res = $shell->riap_request(child_metas => $uri);
-            return $res unless $res->[0] == 200;
-            for my $u (sort keys %{ $res->[2] }) {
-                my $m = $res->[2]{$u};
-                next if defined($leaf) && length($leaf) && $u ne $leaf;
-                my $type; # XXX duplicate code somewhere
-                if ($u =~ m!/\z!) {
-                    $type = 'package';
-                } elsif ($u =~ /\A\$/) {
-                    $type = 'variable';
-                } elsif ($u =~ /\A\w+\z/) {
-                    $type = 'function';
-                }
-                push @allres, {
-                    uri         => $u,
-                    type        => $type,
-                    summary     => $m->{summary},
-                    date        => $m->{entity_date},
-                    v           => $m->{entity_v},
-                };
-            }
-            my $ff = [qw/type uri v date summary/];
-            my $rfo = {
-
-            };
-            $resmeta = {
-                "table.fields"   => $ff,
-            },
-        } else {
-            $res = $shell->riap_request(list => $uri);
-            return $res unless $res->[0] == 200;
-
-            for (@{ $res->[2] }) {
-                next if defined($leaf) && length($leaf) && $_ ne $leaf;
-                push @allres, $_;
-            }
-        }
-
-        if (!@allres && defined($leaf) && length($leaf)) {
-            return [404, "No such file (Riap entity): $path"];
-        }
-
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'load'"];
     }
-    [200, "OK", \@allres, $resmeta];
+
+    my @rows;
+    my %fsls_res;
+    eval { %fsls_res = $obj->{fs}->ls($args{path}) };
+    return [500, "Can't ls: $@"] if $@;
+
+    for my $name (sort { $fsls_res{$a}{order} <=> $fsls_res{$b}{order} } keys %fsls_res) {
+        if ($args{long}) {
+            push @rows, {
+                order => $fsls_res{$name}{order},
+                name => $name,
+            };
+        } else {
+            push @rows, $name;
+        }
+    }
+
+    $resmeta->{'table.fields'} = [qw/order name/] if $args{long};
+    [200, "OK", \@rows, $resmeta];
 }
 
 $SPEC{pwd} = {
@@ -318,58 +256,37 @@ $SPEC{cd} = {
     v => 1.1,
     summary => "Change directory",
     args => {
-        dir => {
+        %argopt_object,
+        path => {
             summary    => '',
             schema     => ['str*'],
             pos        => 0,
-            completion => $complete_dir,
+            completion => $complete_path,
         },
     },
 };
 sub cd {
     my %args = @_;
-    my $dir = $args{dir};
+    my $path = $args{path};
     my $shell = $args{-shell};
 
-    my $opwd = $shell->state("pwd");
-    my $npwd;
-    if (!defined($dir)) {
-        # back to start pwd
-        $npwd = $shell->state("start_pwd");
-    } elsif ($dir eq '-') {
-        if (defined $shell->state("old_pwd")) {
-            $npwd = $shell->state("old_pwd");
-        } else {
-            warn "No old pwd set\n";
-            return [200, "Nothing done"];
-        }
-    } else {
-        if (is_abs_path($dir)) {
-            $npwd = normalize_path($dir);
-        } else {
-            $npwd = concat_path_n($opwd, $dir);
-        }
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'load'"];
     }
-    # check if path actually exists
-    my $uri = $npwd . ($npwd =~ m!/\z! ? "" : "/");
-    my $res = $shell->riap_request(info => $uri);
-    if ($res->[0] == 404) {
-        return [404, "No such directory (Riap package)"];
-    } elsif ($res->[0] != 200) {
-        return $res;
-    }
-    #return [403, "Not a directory (package)"]
-    #    unless $res->[2]{type} eq 'package';
 
-    log_trace("Setting npwd=%s, opwd=%s", $npwd, $opwd);
-    $shell->state(pwd     => $npwd);
-    $shell->state(old_pwd => $opwd);
-    [200, "OK"];
+    eval { $obj->{fs}->cd($path) };
+    if ($@) {
+        return [500, "Can't cd: $@"];
+    } else {
+        return [200, "OK"];
+    }
 }
 
 $SPEC{set} = {
     v => 1.1,
-    summary => "lists or sets setting",
+    summary => "List or set setting",
     args => {
         name => {
             summary    => '',
@@ -437,7 +354,7 @@ sub set {
 
 $SPEC{unset} = {
     v => 1.1,
-    summary => "unsets a setting",
+    summary => "Unset a setting",
     args => {
         name => {
             summary    => '',
@@ -458,71 +375,6 @@ sub unset {
         unless exists $shell->known_settings->{$name};
     delete $shell->{_settings}{$name};
     [200, "OK"];
-}
-
-$SPEC{show} = {
-    v => 1.1,
-    summary => "shows various things",
-    args => {
-        thing => {
-            summary    => 'Thing to show',
-            schema     => ['str*', in => [qw/settings state/]],
-            req        => 1,
-            pos        => 0,
-        },
-    },
-};
-sub show {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    my $thing = $args{thing};
-
-    if ($thing eq 'settings') {
-        return set(-shell=>$shell);
-    } elsif ($thing eq 'state') {
-        [200, "OK", $shell->{_state}];
-    } else {
-        [400, "Invalid argument for show"];
-    }
-}
-
-$SPEC{req} = {
-    v => 1.1,
-    summary => 'performs action on file/dir (Riap entity)',
-    args => {
-        action => {
-            summary => 'Action name',
-            schema => ['str*'],
-            req    => 1,
-            pos    => 0,
-            cmdline_aliases => { a => {} },
-        },
-        path => {
-            summary    => 'Path (entity URI)',
-            schema     => 'str*',
-            req        => 1,
-            pos        => 1,
-            completion => $complete_file_or_dir,
-        },
-        extra => {
-            summary    => 'Extra Riap request keys',
-            schema     => 'hash*',
-            pos        => 2,
-        },
-    },
-};
-sub req {
-    my %args = @_;
-    my $shell = $args{-shell};
-
-    my $action = $args{action};
-    my $pwd    = $shell->state("pwd");
-    my $path   = $args{path};
-    my $uri    = _concat_path_ns($pwd, $path);
-    my $extra  = $args{extra} // {};
-
-    $shell->riap_request($action => $uri, $extra);
 }
 
 $SPEC{history} = {

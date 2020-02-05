@@ -17,6 +17,9 @@ use Path::Naive qw(concat_path_n);
 use Term::Detect::Software qw(detect_terminal_cached);
 use Time::HiRes qw(time);
 
+$ENV{COMPLETE_GETOPT_LONG_DEFAULT_ENV} = 0;
+$ENV{COMPLETE_GETOPT_LONG_DEFAULT_FILE} = 0;
+
 sub new {
     my ($class, %args) = @_;
 
@@ -41,6 +44,7 @@ sub new {
 
     # beginning state
     $self->{_state}{objects} = {};
+    $self->{_state}{curobj}  = undef;
 
     $self;
 }
@@ -268,11 +272,15 @@ sub postloop {
 
 sub prompt_str {
     my $self = shift;
+
+    my $curobj = $self->state('curobj');
+    my $obj = $self->state('objects')->{$curobj // ''};
+
     join(
         "",
         $self->colorize("treesh", "ff6347"), " ", # X:tomato
-        $self->colorize("obj", "eeee00"), " ", # X:yellow2
-        $self->colorize("cwd", "00e5ee"), "", # X:turquoise2
+        $self->colorize(($curobj // '(no curobj)'), "eeee00"), " ", # X:yellow2
+        $self->colorize(($obj ? $obj->{fs}->cwd : "/"), "00e5ee"), "", # X:turquoise2
         "> ",
     );
 }
@@ -312,6 +320,7 @@ sub _run_cmd {
     require Perinci::Result::Format;
     require Perinci::Sub::GetArgs::Argv;
     require Perinci::Sub::ValidateArgs;
+
     local $Perinci::Result::Format::Enable_Cleansing = 1;
 
     my ($self, %args) = @_;
@@ -361,7 +370,7 @@ sub _run_cmd {
     }
 
     my $fmt = $opts->{fmt} //
-        $res->[3]{"x.app.riap.default_format"} //
+        $res->[3]{"x.app.treesh.default_format"} //
             $self->setting('output_format');
 
     print Perinci::Result::Format::format($res, $fmt);
@@ -376,34 +385,22 @@ sub comp_ {
 
     local $self->{_in_completion} = 1;
 
+    # add commands
     my @res = ("help", "exit");
     push @res, grep {/\A\w+\z/} keys %Tree::Shell::Commands::SPEC;
 
-    # add functions
-    my ($dir, $word) = $word0 =~ m!(.*/)?(.*)!;
-    $dir //= "";
-    my $pwd = $self->state("pwd");
-    my $uri = length($dir) ? concat_path_n($pwd, $dir) : $pwd;
-    $uri .= "/" unless $uri =~ m!/\z!;
-    my $extra = {detail=>1};
-    my $res = $self->riap_request(list => $uri, $extra);
-    if ($res->[0] == 200) {
-        for (@{ $res->[2] }) {
-            my $u = $_->{uri};
-            next unless $_->{type} =~ /\A(package|function)\z/;
-            $u =~ s!\A\Q$uri\E!!;
-            push @res, "$dir$u";
-        }
-    }
-    #use Data::Dump; dd \@res;
+    ## add directories
+    #my $dirs = $Tree::Shell::Commands::complete_path->(
+    #    word => "",
+    #    -shell => $self,
+    #);
+    #push @res, @$dirs if ref $dirs eq 'ARRAY';
 
     my $comp = Complete::Bash::format_completion({
         path_sep => '/',
-        as       => 'array',
-        esc_mode => 'default',
         words    => Complete::Util::complete_array_elem(
             array=>\@res, word=>$word0),
-    });
+    }, {as => 'array'});
     if ($self->setting("debug_completion")) {
         say "DEBUG: Completion (1): ".join(", ", @$comp);
     }
@@ -422,40 +419,8 @@ sub catch_run {
     my $self = shift;
     my ($cmd, @argv) = @_;
 
-    my $pwd = $self->state("pwd");
-    my $uri = concat_path_n($pwd, $cmd);
-    my $res = $self->riap_request(info => $uri);
-    if ($res->[0] == 404) {
-        $self->_err([404, "No such command or executable (Riap function)"]);
-        return;
-    } elsif ($res->[0] != 200) {
-        $self->_err($res);
-        return;
-    }
-    unless ($res->[2]{type} eq 'function') {
-        $self->_err([412, "Not an executable (Riap function)"]);
-        return;
-    }
-    my $name = $res->[2]{uri}; $name =~ s!.+/!!;
-
-    $res = $self->riap_request(meta => $uri);
-    if ($res->[0] != 200) {
-        $self->_err(err(500, "Can't get meta", $res));
-        return;
-    }
-    my $meta = $res->[2];
-
-    $self->_run_cmd(
-        name=>$name, meta=>$meta, argv=>\@argv,
-        code=>sub {
-            my %args = @_;
-            delete $args{-shell};
-            $self->riap_request(call => $uri, {args=>\%args});
-        },
-        code_argv=>sub {
-            $self->riap_request(call => $uri, {argv=>\@_});
-        },
-    );
+    $self->_err([404, "No such command"]);
+    return;
 }
 
 sub catch_comp {
@@ -468,15 +433,8 @@ sub catch_comp {
 
     local $self->{_in_completion} = 1;
 
-    my $pwd = $self->state("pwd");
-    my $uri = concat_path_n($pwd, $cmd);
-    my $res = $self->riap_request(info => $uri);
-    return () unless $res->[0] == 200;
-    return () unless $res->[2]{type} eq 'function';
-
-    $res = $self->riap_request(meta => $uri);
-    return () unless $res->[0] == 200;
-    my $meta = $res->[2];
+    my $meta = $Tree::Shell::Commands::SPEC{$cmd};
+    return () unless $meta;
 
     my ($words, $cword) = @{ Complete::Bash::parse_cmdline(
         $line, $start+length($word), {truncate_current_word=>1}) };
@@ -484,22 +442,18 @@ sub catch_comp {
         $words, $cword) };
     shift @$words; $cword--; # strip program name
     $opts = {};
-    $res = Perinci::Sub::Complete::complete_cli_arg(
+    my $res = Perinci::Sub::Complete::complete_cli_arg(
         words => $words, cword => $cword,
         meta => $meta, common_opts => $common_opts,
         extras          => {-shell => $self},
-        riap_server_url => $self->state('server_url'),
-        riap_uri        => $uri,
-        riap_client     => $self->{_pa},
     );
     $res = _hashify_compres($res);
     @{ Complete::Bash::format_completion({
         path_sep => '/',
-        as       => 'array',
         esc_mode => 'default',
         words    => Complete::Util::complete_array_elem(
             array=>$res->{words}, word=>$word),
-    })};
+    }, {as=>'array'})};
 }
 
 sub _hashify_compres {
@@ -553,11 +507,10 @@ sub _install_cmds {
 
             my $comp = Complete::Bash::format_completion({
                 path_sep => '/',
-                as       => 'array',
                 esc_mode => 'default',
                 words    => Complete::Util::complete_array_elem(
                     array=>$res->{words}, word=>$word),
-            });
+            }, {as=>'array'});
             if ($self->setting('debug_completion')) {
                 say "DEBUG: Completion (2): ".join(", ", @$comp);
             }
