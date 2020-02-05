@@ -309,8 +309,9 @@ sub _help_cmd {
 }
 
 sub _run_cmd {
-    require Perinci::Sub::GetArgs::Argv;
     require Perinci::Result::Format;
+    require Perinci::Sub::GetArgs::Argv;
+    require Perinci::Sub::ValidateArgs;
     local $Perinci::Result::Format::Enable_Cleansing = 1;
 
     my ($self, %args) = @_;
@@ -346,7 +347,17 @@ sub _run_cmd {
             last;
         }
 
-        $res = $args{code}->(%{$res->[2]}, -shell => $self);
+        # validate using schemas in Rinci metadata
+        my $args = $res->[2];
+        $res = Perinci::Sub::ValidateArgs::validate_args_using_meta(
+            args => $args,
+            meta => $args{meta},
+        );
+        unless ($res->[0] == 200) {
+            last;
+        }
+
+        $res = $args{code}->(%$args, -shell => $self);
     }
 
     my $fmt = $opts->{fmt} //
