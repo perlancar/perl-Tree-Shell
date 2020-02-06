@@ -44,16 +44,43 @@ my $complete_setting_name = sub {
     [keys %{ $shell->known_settings }];
 };
 
+our $complete_object_name = sub {
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    [keys %{ $shell->state('objects') }];
+};
+
+my %arg0_object = (
+    object => {
+        schema => ['str*', match=>qr/\A\w+\z/],
+        completion => $complete_object_name,
+        req => 1,
+        pos => 0,
+    },
+);
+
 my %argopt_object = (
     object => {
         schema => ['str*', match=>qr/\A\w+\z/],
         cmdline_aliases => {o=>{}},
+        completion => $complete_object_name,
+    },
+);
+
+my %arg0_path = (
+    path => {
+        summary    => 'Path to node',
+        schema     => ['str*'],
+        req        => 1,
+        pos        => 0,
+        completion => $complete_path,
     },
 );
 
 my @drivers = qw(json yaml org);
 
-$SPEC{load} = {
+$SPEC{loadobj} = {
     v => 1.1,
     summary => 'Load tree object',
     description => <<'_',
@@ -82,7 +109,7 @@ _
         },
     },
 };
-sub load {
+sub loadobj {
     require File::Slurper::Dash;
 
     my %args = @_;
@@ -153,7 +180,52 @@ sub objects {
     [200, "OK", \@rows, {'table.fields'=>[qw/name driver source active cwd/]}];
 }
 
-$SPEC{dump} = {
+$SPEC{setcurobj} = {
+    v => 1.1,
+    summary => 'Set current object',
+    args => {
+        %arg0_object,
+    },
+};
+sub setcurobj {
+    my %args = @_;
+    my $shell  = $args{-shell};
+
+    my $objects = $shell->state('objects');
+    $objects->{ $args{object} }
+        or return [404, "No such object '$args{object}'"];
+    $shell->state('curobj', $args{object});
+    [200];
+}
+
+$SPEC{cat} = {
+    v => 1.1,
+    summary => 'Print node as string',
+    args => {
+        %argopt_object,
+        %arg0_path,
+    },
+};
+sub cat {
+    my %args = @_;
+    my $shell  = $args{-shell};
+
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'load'"];
+    }
+
+    my $node;
+    eval {
+        $node = $obj->{fs}->get($args{path});
+    };
+    return [500, "Can't cat: $@"] if $@;
+
+    [200, "OK", $node->as_string];
+}
+
+$SPEC{dumpobj} = {
     v => 1.1,
     summary => 'Dump a loaded object',
     description => <<'_',
@@ -161,14 +233,14 @@ $SPEC{dump} = {
 _
     args => {
         name => {
-            schema => 'str*',
+            schema => ['str*'],
             req => 1,
             pos => 0,
-            #completion => $complete_object_name,
+            completion => $complete_object_name,
         },
     },
 };
-sub dump {
+sub dumpobj {
     my %args = @_;
     my $name   = $args{name};
     my $shell  = $args{-shell};
@@ -177,7 +249,7 @@ sub dump {
     return [404, "No object by that name"] unless $objects->{$name};
 
     require Tree::Dump;
-    [200, "OK", Tree::Dump::tdmp($objects->{$name}{object}),
+    [200, "OK", Tree::Dump::tdmp($objects->{$name}{fs}{tree}),
      {'cmdline.skip_format'=>1}];
 }
 
@@ -282,6 +354,110 @@ sub cd {
     } else {
         return [200, "OK"];
     }
+}
+
+our %args_cp_or_mv = (
+    src_object => {
+        summary => 'Source object name',
+        schema => ['str*', match=>qr/\A\w+\z/],
+        completion => $complete_object_name,
+        req => 1,
+        pos => 0,
+    },
+    src_path => {
+        summary => 'Source path',
+        schema => 'str*',
+        completion => sub {
+            my %args = @_;
+            my $shell = $args{-shell};
+            my $src_object = $args{args}{src_object};
+            return [] unless defined $src_object;
+            my $obj = $shell->state('objects')->{ $src_object // '' };
+            return [] unless $obj;
+            my $save_curobj = $shell->state('curobj');
+            $shell->state('curobj', $src_object);
+            my $res = $complete_path->(%args);
+            $shell->state('curobj', $save_curobj);
+            $res;
+        },
+        req => 1,
+        pos => 1,
+    },
+    target_object => {
+        summary => 'Target object name',
+        schema => ['str*', match=>qr/\A\w+\z/],
+        completion => $complete_object_name,
+        req => 1,
+        pos => 2,
+    },
+    target_path => {
+        summary => 'Target path',
+        schema => 'str*',
+        completion => sub {
+            my %args = @_;
+            my $shell = $args{-shell};
+            my $target_object = $args{args}{target_object};
+            return [] unless defined $target_object;
+            my $obj = $shell->state('objects')->{ $target_object // '' };
+            return [] unless $obj;
+            my $save_curobj = $shell->state('curobj');
+            $shell->state('curobj', $target_object);
+            my $res = $complete_path->(%args);
+            $shell->state('curobj', $save_curobj);
+            $res;
+        },
+        req => 1,
+        pos => 3,
+    },
+);
+
+sub _cp_or_mv {
+    my $which = shift;
+
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    my $resmeta = {};
+
+    my $src_obj = $shell->state('objects')->{ $args{src_object} // '' }
+        or return [412, "No such source object '$args{src_object}'"];
+    my $target_obj = $shell->state('objects')->{ $args{target_object} // '' }
+        or return [412, "No such target object '$args{target_object}'"];
+
+    eval {
+        local $src_obj->{fs}{tree1} = $src_obj->{fs}{tree};
+        local $src_obj->{fs}{_curnode1} = $src_obj->{fs}{_curnode};
+        local $src_obj->{fs}{_curpath1} = $src_obj->{fs}{_curpath};
+        local $src_obj->{fs}{tree2} = $target_obj->{fs}{tree};
+        local $src_obj->{fs}{_curnode2} = $target_obj->{fs}{_curnode};
+        local $src_obj->{fs}{_curpath2} = $target_obj->{fs}{_curpath};
+
+        $src_obj->{fs}->cp($args{src_path}, $args{target_path});
+    };
+    return [500, "Can't cp: $@"] if $@;
+    [200];
+}
+
+$SPEC{cp} = {
+    v => 1.1,
+    summary => 'Copy nodes from one object to another',
+    args => {
+        %args_cp_or_mv,
+    },
+};
+sub cp {
+    _cp_or_mv('cp', @_);
+}
+
+$SPEC{mv} = {
+    v => 1.1,
+    summary => 'Move nodes from one object to another',
+    args => {
+        %args_cp_or_mv,
+    },
+};
+sub mv {
+    _cp_or_mv('mv', @_);
 }
 
 $SPEC{set} = {
