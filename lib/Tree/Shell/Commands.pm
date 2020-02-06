@@ -357,13 +357,6 @@ sub cd {
 }
 
 our %args_cp_or_mv = (
-    src_object => {
-        summary => 'Source object name',
-        schema => ['str*', match=>qr/\A\w+\z/],
-        completion => $complete_object_name,
-        req => 1,
-        pos => 0,
-    },
     src_path => {
         summary => 'Source path',
         schema => 'str*',
@@ -381,14 +374,12 @@ our %args_cp_or_mv = (
             $res;
         },
         req => 1,
-        pos => 1,
+        pos => 0,
     },
     target_object => {
         summary => 'Target object name',
         schema => ['str*', match=>qr/\A\w+\z/],
         completion => $complete_object_name,
-        req => 1,
-        pos => 2,
     },
     target_path => {
         summary => 'Target path',
@@ -407,7 +398,7 @@ our %args_cp_or_mv = (
             $res;
         },
         req => 1,
-        pos => 3,
+        pos => 1,
     },
 );
 
@@ -419,9 +410,9 @@ sub _cp_or_mv {
 
     my $resmeta = {};
 
-    my $src_obj = $shell->state('objects')->{ $args{src_object} // '' }
-        or return [412, "No such source object '$args{src_object}'"];
-    my $target_obj = $shell->state('objects')->{ $args{target_object} // '' }
+    my $src_obj = $shell->state('objects')->{ $shell->state('curobj') // '' }
+        or return [412, "No object loaded, please load an object first"];
+    my $target_obj = $shell->state('objects')->{ $args{target_object} // $shell->state('curobj') // '' }
         or return [412, "No such target object '$args{target_object}'"];
 
     eval {
@@ -458,6 +449,34 @@ $SPEC{mv} = {
 };
 sub mv {
     _cp_or_mv('mv', @_);
+}
+
+$SPEC{rm} = {
+    v => 1.1,
+    summary => 'Remove nodes',
+    args => {
+        %arg0_path,
+        %argopt_object,
+    },
+};
+sub rm {
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    my $resmeta = {};
+
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'load'"];
+    }
+
+    eval {
+        $obj->{fs}->rm($args{path});
+    };
+    return [500, "Can't rm: $@"] if $@;
+
+    [200];
 }
 
 $SPEC{set} = {
