@@ -13,7 +13,6 @@ use Log::ger;
 use parent qw(Term::Shell);
 
 use Color::ANSI::Util qw(ansifg);
-use Path::Naive qw(concat_path_n);
 use Term::Detect::Software qw(detect_terminal_cached);
 use Time::HiRes qw(time);
 

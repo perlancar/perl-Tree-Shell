@@ -32,7 +32,7 @@ our $complete_path = sub {
 
     my $cwd = $obj->{fs}->cwd;
     my %fsls_res = $obj->{fs}->ls(
-        length($dir) ? scalar(Path::Naive::concat_path_n($cwd, $dir)) : undef);
+        length($dir) ? scalar(Path::Naive::concat_and_normalize_path($cwd, $dir)) : undef);
 
     [map {(length($dir) ? $dir : "") . "$_/"} keys %fsls_res];
 };
@@ -73,6 +73,15 @@ my %arg0_path = (
         summary    => 'Path to node',
         schema     => ['str*'],
         req        => 1,
+        pos        => 0,
+        completion => $complete_path,
+    },
+);
+
+my %argopt0_path = (
+    path => {
+        summary    => 'Path to node',
+        schema     => ['str*'],
         pos        => 0,
         completion => $complete_path,
     },
@@ -234,7 +243,6 @@ _
     args => {
         name => {
             schema => ['str*'],
-            req => 1,
             pos => 0,
             completion => $complete_object_name,
         },
@@ -244,6 +252,9 @@ sub dumpobj {
     my %args = @_;
     my $name   = $args{name};
     my $shell  = $args{-shell};
+
+    $name //= $shell->state('curobj');
+    return [412, "Please load an object first"] unless defined $name;
 
     my $objects = $shell->state('objects');
     return [404, "No object by that name"] unless $objects->{$name};
@@ -356,6 +367,29 @@ sub cd {
     }
 }
 
+$SPEC{tree} = {
+    v => 1.1,
+    summary => 'Show filesystem tree',
+    args => {
+        %argopt_object,
+        %argopt0_path,
+    },
+};
+sub tree {
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    my $resmeta = {};
+
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'load'"];
+    }
+
+    [200, "OK", $obj->{fs}->showtree($args{path})];
+}
+
 our %args_cp_or_mv = (
     src_path => {
         summary => 'Source path',
@@ -363,14 +397,9 @@ our %args_cp_or_mv = (
         completion => sub {
             my %args = @_;
             my $shell = $args{-shell};
-            my $src_object = $args{args}{src_object};
-            return [] unless defined $src_object;
-            my $obj = $shell->state('objects')->{ $src_object // '' };
+            my $obj = $shell->state('objects')->{ $shell->state('curobj') // '' };
             return [] unless $obj;
-            my $save_curobj = $shell->state('curobj');
-            $shell->state('curobj', $src_object);
             my $res = $complete_path->(%args);
-            $shell->state('curobj', $save_curobj);
             $res;
         },
         req => 1,
@@ -388,11 +417,10 @@ our %args_cp_or_mv = (
             my %args = @_;
             my $shell = $args{-shell};
             my $target_object = $args{args}{target_object};
-            return [] unless defined $target_object;
-            my $obj = $shell->state('objects')->{ $target_object // '' };
+            my $obj = $shell->state('objects')->{ $target_object // $shell->state('curobj') // '' };
             return [] unless $obj;
             my $save_curobj = $shell->state('curobj');
-            $shell->state('curobj', $target_object);
+            $shell->state('curobj', $target_object) if defined $target_object;
             my $res = $complete_path->(%args);
             $shell->state('curobj', $save_curobj);
             $res;
