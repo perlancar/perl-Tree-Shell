@@ -110,6 +110,10 @@ _
             schema => ['str*'],
             pos => 2,
             req => 1,
+            completion => sub {
+                require Complete::File;
+                Complete::File::complete_file(@_);
+            },
         },
         opts => {
             'x.name.is_plural' => 1,
