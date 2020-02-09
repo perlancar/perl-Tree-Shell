@@ -151,7 +151,8 @@ sub loadobj {
         #my $tree = Data::CSel::WrapStruct::wrap_struct($data);
     } elsif ($driver eq 'org') {
         require Tree::FSMethods::Org;
-        $fs = Tree::FSMethods::Org->new(org_file => $source);
+        eval { $fs = Tree::FSMethods::Org->new(org_file => $source) };
+        return [500, "Can't load org file: $@"] if $@;
     } else {
         return [500, "Unknown driver '$driver', known drivers: ".join(", ", @drivers)];
     }
