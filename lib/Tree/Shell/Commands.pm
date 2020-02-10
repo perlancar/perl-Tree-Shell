@@ -107,7 +107,7 @@ _
             req => 1,
         },
         source => {
-            schema => ['str*'],
+            schema => ['pathname*'],
             pos => 2,
             req => 1,
             completion => sub {
@@ -227,7 +227,7 @@ sub cat {
     my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
     unless ($obj) {
         return [412, "No such object '$args{object}'"] if defined $args{object};
-        return [412, "No loaded objects, load some first using 'load'"];
+        return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
     my $node;
@@ -307,7 +307,7 @@ sub ls {
     my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
     unless ($obj) {
         return [412, "No such object '$args{object}'"] if defined $args{object};
-        return [412, "No loaded objects, load some first using 'load'"];
+        return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
     my @rows;
@@ -361,7 +361,7 @@ sub cd {
     my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
     unless ($obj) {
         return [412, "No such object '$args{object}'"] if defined $args{object};
-        return [412, "No loaded objects, load some first using 'load'"];
+        return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
     eval { $obj->{fs}->cd($path) };
@@ -389,7 +389,7 @@ sub tree {
     my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
     unless ($obj) {
         return [412, "No such object '$args{object}'"] if defined $args{object};
-        return [412, "No loaded objects, load some first using 'load'"];
+        return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
     [200, "OK", $obj->{fs}->showtree($args{path})];
@@ -501,7 +501,7 @@ sub rm {
     my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
     unless ($obj) {
         return [412, "No such object '$args{object}'"] if defined $args{object};
-        return [412, "No loaded objects, load some first using 'load'"];
+        return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
     eval {
