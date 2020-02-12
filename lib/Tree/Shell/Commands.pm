@@ -31,10 +31,10 @@ our $complete_path = sub {
     return {message=>"No current object, please load some objects first"} unless $obj;
 
     my $cwd = $obj->{fs}->cwd;
-    my %fsls_res = $obj->{fs}->ls(
-        length($dir) ? scalar(Path::Naive::concat_and_normalize_path($cwd, $dir)) : undef);
+    my @entries = $obj->{fs}->ls(
+        length($dir) ? Path::Naive::concat_and_normalize_path($cwd, $dir)."/*" : undef);
 
-    [map {(length($dir) ? $dir : "") . "$_/"} keys %fsls_res];
+    [map {(length($dir) ? $dir : "") . "$_->{name}/"} @entries];
 };
 
 my $complete_setting_name = sub {
