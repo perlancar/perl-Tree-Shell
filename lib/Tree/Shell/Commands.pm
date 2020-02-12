@@ -311,18 +311,18 @@ sub ls {
     }
 
     my @rows;
-    my %fsls_res;
-    eval { %fsls_res = $obj->{fs}->ls($args{path}) };
+    my @entries;
+    eval { @entries = $obj->{fs}->ls($args{path}) };
     return [500, "Can't ls: $@"] if $@;
 
-    for my $name (sort { $fsls_res{$a}{order} <=> $fsls_res{$b}{order} } keys %fsls_res) {
+    for my $entry (@entries) {
         if ($args{long}) {
             push @rows, {
-                order => $fsls_res{$name}{order},
-                name => $name,
+                order => $entry->{order},
+                name  => $entry->{name},
             };
         } else {
-            push @rows, $name;
+            push @rows, $entry->{name};
         }
     }
 
