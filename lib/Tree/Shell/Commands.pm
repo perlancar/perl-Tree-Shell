@@ -375,10 +375,20 @@ sub cd {
         return [412, "No loaded objects, load some first using 'loadobj'"];
     }
 
+    my $cwd = $obj->{fs}->cwd;
+    if ($path eq '-') {
+        if (defined $obj->{oldcwd}) {
+            $path = $obj->{oldcwd};
+        } else {
+            return [412, "Old directory not set yet, cd to some directory first"];
+        }
+    }
+
     eval { $obj->{fs}->cd($path) };
     if ($@) {
         return [500, "Can't cd: $@"];
     } else {
+        $obj->{oldcwd} = $cwd;
         return [200, "OK"];
     }
 }
