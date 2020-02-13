@@ -70,11 +70,22 @@ my %argopt_object = (
 
 my %arg0_path = (
     path => {
-        summary    => 'Path to node',
+        summary    => 'Path',
         schema     => ['str*'],
         req        => 1,
         pos        => 0,
         completion => $complete_path,
+    },
+);
+
+my %arg0_paths = (
+    paths => {
+        summary    => 'Paths',
+        schema     => ['array*', of=>'str*'],
+        req        => 1,
+        pos        => 0,
+        slurpy     => 1,
+        element_completion => $complete_path,
     },
 );
 
@@ -524,6 +535,45 @@ sub rm {
         $obj->{fs}->rm($args{path});
     };
     return [500, "Can't rm: $@"] if $@;
+
+    [200];
+}
+
+$SPEC{mkdir} = {
+    v => 1.1,
+    summary => 'Create an empty directory',
+    args => {
+        %arg0_paths,
+        %argopt_object,
+        parents => {
+            schema => 'true*',
+            cmdline_aliases => {p=>{}},
+        },
+    },
+};
+sub mkdir {
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    my $resmeta = {};
+
+    my $obj = $shell->state('objects')->{ $args{object} // $shell->state('curobj') // '' };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'loadobj'"];
+    }
+
+    my %opts;
+    $opts{parents} = 1 if $args{parents};
+
+    my $has_error;
+    for my $path (@{ $args{paths} }) {
+        eval { $obj->{fs}->mkdir(\%opts, $path) };
+        if ($@) {
+            warn "Can't mkdir $path: $@\n";
+            $has_error++;
+        }
+    }
 
     [200];
 }
