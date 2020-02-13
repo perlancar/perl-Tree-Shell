@@ -332,12 +332,23 @@ sub ls {
 
 $SPEC{pwd} = {
     v => 1.1,
-    summary => 'Show current directory of object(s)',
+    summary => 'Show current directory of object',
     args => {
+        %argopt_object,
     },
 };
 sub pwd {
-    goto &objects;
+    my %args = @_;
+    my $shell = $args{-shell};
+
+    my $objname = $args{object} // $shell->state('curobj') // '';
+    my $obj = $shell->state('objects')->{ $objname };
+    unless ($obj) {
+        return [412, "No such object '$args{object}'"] if defined $args{object};
+        return [412, "No loaded objects, load some first using 'loadobj'"];
+    }
+
+    return [200, "OK", "$obj->{fs}{_curpath} ($objname)"];
 }
 
 $SPEC{cd} = {
