@@ -441,24 +441,19 @@ sub _cp_or_mv {
     my %args = @_;
     my $shell = $args{-shell};
 
-    my $resmeta = {};
-
     my $src_obj = $shell->state('objects')->{ $shell->state('curobj') // '' }
         or return [412, "No object loaded, please load an object first"];
     my $target_obj = $shell->state('objects')->{ $args{target_object} // $shell->state('curobj') // '' }
         or return [412, "No such target object '$args{target_object}'"];
 
     eval {
-        local $src_obj->{fs}{tree1} = $src_obj->{fs}{tree};
-        local $src_obj->{fs}{_curnode1} = $src_obj->{fs}{_curnode};
-        local $src_obj->{fs}{_curpath1} = $src_obj->{fs}{_curpath};
         local $src_obj->{fs}{tree2} = $target_obj->{fs}{tree};
         local $src_obj->{fs}{_curnode2} = $target_obj->{fs}{_curnode};
         local $src_obj->{fs}{_curpath2} = $target_obj->{fs}{_curpath};
 
-        $src_obj->{fs}->cp($args{src_path}, $args{target_path});
+        $src_obj->{fs}->$which($args{src_path}, $args{target_path});
     };
-    return [500, "Can't cp: $@"] if $@;
+    return [500, "Can't $which: $@"] if $@;
     [200];
 }
 
