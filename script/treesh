@@ -26,18 +26,14 @@ $shell->cmdloop;
 
  treesh> _
 
-Load a tree object (from a JSON file):
+Load a tree object (from an Org document):
 
- treesh> load --as bookstore --driver json --source /home/budi/bookstore.json
- treesh> load bookstore json /home/budi/bookstore.json
+ treesh> load --as animals --driver org --source /home/budi/animals.org
+ treesh> load animals org /home/budi/animals.org
 
-Load another tree object (from an Org document):
+Load another tree object:
 
- treesh> load todo org /home/budi/todo.org
-
-Load with some options:
-
- treesh> load todo org /home/budi/todo.org --opt NAME=VAL ...
+ treesh> load plants org ~/plants.org
 
 See loaded objects:
 
@@ -45,58 +41,72 @@ See loaded objects:
  +-----------+--------+---------------------------+-----+
  | name      | driver | source                    | cwd |
  +-----------+--------+---------------------------+-----+
- | bookstore | json   | /home/budi/bookstore.json | /   |
- | todo      | org    | /home/budi/todo.org       | /   |
+ | animals   | org    | /home/budi/animals.json   | /   |
+ | plants    | org    | /home/budi/plants.org     | /   |
  +-----------+--------+---------------------------+-----+
 
 Dump a loaded object:
 
- treesh> dump bookstore
+ treesh> dumpobj animals
  ...
 
 Browse top-level children of a tree object:
 
- treesh> setobj todo
+ treesh> setcurobj plants
  treesh> ls -l
  ...
 
 or:
 
- treesh> ls -l --obj todo
+ treesh> ls -l --obj plants
  ...
 
 Change "directory" to view another part of the tree (from hereon, please
-remember that you can set the object you want to work with with C<setobj>
+remember that you can set the object you want to work with with C<setcurobj>
 command first, or specify the name of the object using C<--object> option):
 
- treesh> cd /Foo
+ treesh> cd /dog
  treesh> ls -l
 
 Removing nodes of a tree object:
 
- treesh> rm Todo*
+ treesh> rm poo*
 
-Reload an object from file (reverting all modifications):
+[NOT YET IMPLEMENTED] Reload an object from file (reverting all modifications):
 
- treesh> reload todo
+ treesh> reloadobj animals
 
-Save a loaded object to file:
+[NOT YET IMPLEMENTED] Save a loaded object to file:
 
- treesh> save todo
+ treesh> saveobj animals
 
-Save a loaded object to another file:
+[NOT YET IMPLEMENTED] Save a loaded object to another file:
 
- treesh> save todo /home/budi/todo-new.org
+ treesh> saveobj animals /home/budi/animals-new.org
 
 
 =head1 DESCRIPTION
 
-This utility lets you navigate and manipulate in-memory tree objects. You can
-load data structures like JSON and YAML, as well as other kinds of document like
-Org, Perl code (PPI), and HTML, as tree objects. You can then browse the tree as
-if it were a filesystem, using command like C<cd> and C<ls>. You can prune
-nodes, add/modify nodes, as well as move/copy nodes around. You can save the
-changes back to file.
+This utility lets you navigate and manipulate in-memory tree objects. Currently
+supported tree objects:
+
+=over
+
+=item * Org (parsed using L<Org::Parser::Tiny>)
+
+=item * JSON [NOT YET IMPLEMETED]
+
+=item * YAML [NOT YET IMPLEMETED]
+
+=item * HTML [NOT YET IMPLEMETED]
+
+=item * PPI [NOT YET IMPLEMETED]
+
+=back
+
+You can then browse the tree as if it were a filesystem, using command like
+C<cd> and C<ls>. You can prune nodes, add/modify nodes, as well as move/copy
+nodes around. You can save the changes back to file.
 
 
 =head1 OPTIONS
@@ -111,63 +121,12 @@ Show short help message and exit.
 
 Show version and exit.
 
+=back
+
 
 =head1 COMMANDS
 
-=head2 cd
-
-Usage:
-
- cd [--object=NAME] [path]
-
-Change directory of a loaded object. If C<path> is omitted, it's assumed to be
-C</>.
-
-=head2 exit
-
-=head2 help
-
-Usage:
-
- help [command]
-
-Display help message.
-
-=head2 objects
-
-Show the loaded objects.
-
-=head2 pwd
-
-Print the current directory for each loaded objects. Currently the same as
-L</objects>.
-
-=head2 ls
-
-Usage:
-
- ls [-l] [--object=NAME] [path ...]
-
-List children of a node. If C<path> is omitted, will default to the current
-working directory of the object.
-
-=head2 set
-
-Usage:
-
- set [name] [value]
-
-If invoked without any argument, will list all known settings. If C<name> is
-specified but C<value> is not, will show value for that particular setting. If
-C<name> and C<value> is both specified, will set a setting's value.
-
-=head2 setobj
-
-Usage:
-
- setobj <name>
-
-Set the current object to C<name>.
+For now, use C<help> command, or I<command> C<--help>.
 
 
 =head1 SETTINGS
